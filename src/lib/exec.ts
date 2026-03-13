@@ -1,8 +1,6 @@
-import {
-  exec as execCallback,
-  execFileSync,
-  execSync,
-} from "node:child_process";
+import { exec as execCallback, execSync } from "node:child_process";
+import { accessSync, constants } from "node:fs";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
 const execAsync = promisify(execCallback);
@@ -10,15 +8,23 @@ const execAsync = promisify(execCallback);
 export function getEnv(): NodeJS.ProcessEnv {
   const home = process.env.HOME ?? "";
   const extraPaths = [
-    "/opt/homebrew/bin",
-    "/usr/local/bin",
+    home ? `${home}/.local/bin` : "",
     home ? `${home}/.opencode/bin` : "",
+    home ? `${home}/.bun/bin` : "",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
     "/opt/zerobrew/prefix/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+    "/Applications/Tailscale.app/Contents/MacOS",
   ];
-  const currentPath = process.env.PATH ?? "";
-  const path = [...extraPaths.filter(Boolean), currentPath]
-    .filter(Boolean)
-    .join(":");
+  const currentPath = (process.env.PATH ?? "").split(delimiter);
+  const path = [
+    ...new Set([...extraPaths, ...currentPath].filter(Boolean)),
+  ].join(delimiter);
 
   return {
     ...process.env,
@@ -27,12 +33,28 @@ export function getEnv(): NodeJS.ProcessEnv {
 }
 
 export function which(cmd: string): boolean {
-  try {
-    execFileSync("which", [cmd], { env: getEnv(), stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
+  if (cmd.includes("/")) {
+    try {
+      accessSync(cmd, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
   }
+
+  const env = getEnv();
+  const dirs = (env.PATH ?? "").split(delimiter);
+
+  for (const dir of dirs) {
+    if (!dir) continue;
+    try {
+      accessSync(join(dir, cmd), constants.X_OK);
+      return true;
+    } catch {
+      // not in this dir
+    }
+  }
+  return false;
 }
 
 export async function run(
